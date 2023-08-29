@@ -36,10 +36,12 @@ type
 procedure TAntiban.Setup(); override;
 begin
   //Self.Skills := [ERSSkill.TOTAL, ERSSkill.RANGE];
-  Self.MinZoom := 10;
+  Self.MinZoom := 20;
   Self.MaxZoom := 40;
 
   Self.Skills := [
+    ERSSkill.HITPOINTS,
+    ERSSkill.PRAYER,
     ERSSkill.TOTAL
   ];
 

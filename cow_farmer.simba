@@ -31,6 +31,7 @@ type
     Cowhide: TRSItem;
     HideCount: Int32;
     CustomBank: TRSObject;
+    LootInCombat: Boolean;
   end;
 
 procedure TAntiban.Setup(); override;
@@ -52,7 +53,7 @@ function TCowFarmer.GetCustomCow(): TRSMonster;
 var
   CustomCow: TRSMonster;
 begin
-  CustomCow.Setup(55, 4, [[PenBox.x1 + 16, PenBox.y1 + 16], [PenBox.x2 - 16, PenBox.y2 - 16]]);
+  CustomCow.Setup(55, 4, [[PenBox.x1 + 24, PenBox.y1 + 24], [PenBox.x2 - 16, PenBox.y2 - 16]]);
   CustomCow.Setup('Cow');
   CustomCow.UpText += 'Cow calf';
   CustomCow.Finder.Colors += CTS2(1452592, 10);
@@ -63,7 +64,7 @@ end;
 
 function TCowFarmer.GetCustomBank(): TRSObject;
 var
-  CustomBank: TRSObject
+  CustomBank: TRSObject;
 begin
   CustomBank.Setup(7, [[7432, 3032], [7436, 3032], [7440, 3032], [7444, 3032], [7448, 3032], [7452, 3032]]);
   CustomBank.Setup(['ank b', 'k booth']);
@@ -91,6 +92,8 @@ begin
   Self.Cowhide := 'Cowhide';
   Self.CustomBank := Self.GetCustomBank();
 
+  Self.LootInCombat := True;
+
   CombatHandler.Setup(True, Self.GetCustomCow(), 10, 2000);
   Options.SetNPCAttackOption(ERSAttackOption.ALWAYS_LEFT_CLICK);
   Combat.SetAutoRetaliate(True);
@@ -105,17 +108,45 @@ begin
   end;
 end;
 
+procedure TCowFarmer.HandleInCombat();
+begin
+  if Self.LootInCombat then
+  begin
+    WaitUntil(not Self.InCombat(), 100, 2000);
+    if Self.InCombat() and Antiban.BioDice() then
+    begin
+      CombatHandler.LootHandler.CheckLoot();
+      begin
+        Minimap.WaitMoving(False);
+        while CombatHandler.LootHandler.CheckLoot(Self.RSW.GetMyTileMS()) do continue;
+      end;
+      WaitUntil(not Self.InCombat(), 100, 3000);
+    end;
+  end
+  else begin
+    WaitUntil(not Self.InCombat(), 100, 3000);
+  end;
+end;
+
 procedure TCowFarmer.Loot();
 var
   Continue: Boolean := True;
   LootCount: Int32 := 0;
+  MaxLootCount: Int32;
 begin
+  MaxLootCount := 1;
   while Continue do
   begin
     LootCount := LootCount + 1;
-    Continue := CombatHandler.LootHandler.CheckLoot() and (LootCount < 3);
+    if CombatHandler.LootHandler.CheckLoot() then
+    begin
+      Minimap.WaitMoving(False);
+      while CombatHandler.LootHandler.CheckLoot(Self.RSW.GetMyTileMS()) do continue;
+    end;
+    Continue := (not Inventory.IsFull()) and (LootCount < MaxLootCount);
   end;
-  Self.HandleBones();
+  if Antiban.BioDice() then Self.HandleBones();
+  if Antiban.BioDice() then Self.HandleBones();
 end;
 
 procedure TCowFarmer.HandleBones();
@@ -127,26 +158,26 @@ end;
 
 procedure TCowFarmer.EnterPen();
 begin
-  Self.RSW.WalkPath([Self.InsideGatePos], 3);
-  if not Self.RSW.GetMyPos().InBox(Self.PenBox) then
+  Self.RSW.WalkPath([Self.OutsideGatePos], 5);
+  Minimap.WaitMoving(False);
+  if not Self.NorthGateHandler.IsOpen() then
   begin
-    //Self.RSW.WalkPath([Self.OutsideGatePos]);
-    if not Self.NorthGateHandler.IsOpen() then Self.NorthGateHandler.Open();
+    Self.NorthGateHandler.Open();
     Wait(500, 1000);
-    Self.RSW.WalkPath([Self.CenterPenPos]);
   end;
+  Self.RSW.WalkPath([Self.CenterPenPos], 3);
 end;
 
 procedure TCowFarmer.ExitPen();
 begin
-  Self.RSW.WalkPath([Self.OutsideGatePos], 3);
-  if Self.RSW.GetMyPos().InBox(Self.PenBox) then
+  Self.RSW.WalkPath([Self.InsideGatePos], 5);
+  Minimap.WaitMoving(False);
+  if not Self.NorthGateHandler.IsOpen() then
   begin
-    //Self.RSW.WalkPath([Self.OutsideGatePos]);
-    if not Self.NorthGateHandler.IsOpen() then Self.NorthGateHandler.Open();
+    Self.NorthGateHandler.Open();
     Wait(500, 1000);
-    Self.RSW.WalkPath([Self.OutsideGatePos]);
   end;
+  Self.RSW.WalkPath([Self.OutsideGatePos]);
 end;
 
 procedure TCowFarmer.WalkToBank();
@@ -175,10 +206,24 @@ begin
         Self.HideCount := Self.HideCount + HideCount;
         Writeln(Self.HideCount);
         Self.State := WALK_TO_PEN;
+        WaitUntil(Inventory.Count() = 0, 100, 1000);
         Bank.Close(AntiBan.BioDice());
       end;
     end;
   end;
+end;
+
+procedure TCowFarmer.HandleLost();
+var
+  MyPos: TPoint;
+  DistanceToBank: Double;
+  DistanceToPen: Double;
+begin
+  MyPos := Self.RSW.GetMyPos();
+  DistanceToBank := MyPos.DistanceTo(Self.PathToBank[Length(Self.PathToBank) - 1]);
+  DistanceToPen := MyPos.DistanceTo(Self.CenterPenPos);
+  if DistanceToPen > DistanceToBank then Self.RSW.WalkPath([Self.PathToBank[Length(Self.PathToBank) - 1]])
+  else Self.EnterPen();
 end;
 
 function TCowFarmer.InCombat(): Boolean;
@@ -236,13 +281,13 @@ begin
     OldState := Self.State;
     case Self.State of
       ATTACK_COW: CombatHandler.WalkAttackMonster();
-      COW_COMBAT: WaitUntil(not Self.InCombat(), 250, 2000);
+      COW_COMBAT: Self.HandleInCombat();
       PICK_UP: Self.Loot();
       OUT_OF_PEN: Self.EnterPen();
       WALK_TO_BANK: Self.WalkToBank();
       BANK_HIDES: Self.BankHides();
       WALK_TO_PEN: Self.WalkToPen();
-      LOST: Self.RSW.WalkPath(Self.PathToBank);
+      LOST: Self.HandleLost();
     end;
   until Self.ShouldStop();
 
@@ -291,5 +336,41 @@ begin
   CowFarmer.Init(20, 7200000);
 
   CowFarmer.Run();
+end;
+
+
+
+function TRSWalker.GetMyTileMS(): TPoint;
+var
+  MyPos: TPoint;
+begin
+  MyPos := Self.GetMyPos();
+  Exit(Self.GetTileMSEx(MyPos, MyPos).Mean());
+end;
+
+function MonsterData.GetDrops(monster: String): TRSMonsterDropArray; static; override;
+var
+  JSONArray: TJSONArray;
+  i: Int32;
+  drop: TRSMonsterDrop;
+begin
+  WriteLn('Loading ' + Monster + ' drops, this might take up to a 1 minute.');
+
+  JSONArray := MonsterData.GetJSONArray(Monster, 'drops');
+
+  for i := 0 to JSONArray.length() - 1 do
+  begin
+    drop := [];
+    drop := MonsterData.GetDrop(JSONArray.getJSONObject(i));
+    if drop.Item = 'raw beef' then continue;
+
+    if not drop.Stackable then
+    begin
+      drop.Stackable := drop.ID.ContainsAny(['995', '996', '997', '998', '999', '1000', '1001', '1002', '1003', '1004']) or
+                        ItemData.GetOSRSBoxBoolean(drop.ID, 'stackable');
+    end;
+
+    Result += Drop;
+  end;
 end;
 

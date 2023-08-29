@@ -32,6 +32,7 @@ type
     HideCount: Int32;
     CustomBank: TRSObject;
     LootInCombat: Boolean;
+    CowhideColor: TCTS2Color;
   end;
 
 procedure TAntiban.Setup(); override;
@@ -53,12 +54,14 @@ function TCowFarmer.GetCustomCow(): TRSMonster;
 var
   CustomCow: TRSMonster;
 begin
-  CustomCow.Setup(55, 4, [[PenBox.x1 + 24, PenBox.y1 + 24], [PenBox.x2 - 16, PenBox.y2 - 16]]);
+  CustomCow.Setup(55, 4, [[PenBox.x1 + 16, PenBox.y1 + 16], [PenBox.x2 - 12, PenBox.y2 - 12], [PenBox.x1 - 12, PenBox.y1 + 12], [PenBox.x2 + 12, PenBox.y2 - 12]]);
   CustomCow.Setup('Cow');
   CustomCow.UpText += 'Cow calf';
   CustomCow.Finder.Colors += CTS2(1452592, 10);
   CustomCow.Finder.Colors += CTS2(5463667, 10);
   CustomCow.Finder.Colors += CTS2(5529974, 10);
+  CustomCow.Finder.Colors += CTS2(13092814, 10);
+  CustomCow.Finder.Colors += CTS2(5005930, 10);
   Result := CustomCow;
 end;
 
@@ -93,6 +96,7 @@ begin
   Self.CustomBank := Self.GetCustomBank();
 
   Self.LootInCombat := True;
+  Self.CowhideColor := CTS2(13092814, 10);
 
   CombatHandler.Setup(True, Self.GetCustomCow(), 10, 2000);
   Options.SetNPCAttackOption(ERSAttackOption.ALWAYS_LEFT_CLICK);
@@ -109,18 +113,27 @@ begin
 end;
 
 procedure TCowFarmer.HandleInCombat();
+var
+  slots: TIntegerArray;
 begin
+  if Antiban.BioDice() then
+    Self.RSW.CheckRunEnergy();
+  if Antiban.BioDice() and Inventory.FindItems(REMAINS, slots) then
+    Self.HandleBones();
+
   if Self.LootInCombat then
   begin
     WaitUntil(not Self.InCombat(), 100, 2000);
     if Self.InCombat() and Antiban.BioDice() then
     begin
-      CombatHandler.LootHandler.CheckLoot();
+      if CombatHandler.LootHandler.CheckLoot() then
       begin
         Minimap.WaitMoving(False);
-        while CombatHandler.LootHandler.CheckLoot(Self.RSW.GetMyTileMS()) do continue;
+        Wait(300, 500);
+        while CombatHandler.LootHandler.CheckLoot(Self.RSW.GetMyTileMS()) do wait(200, 400);
+        if Antiban.BioDice() then Self.HandleBones();
       end;
-      WaitUntil(not Self.InCombat(), 100, 3000);
+      WaitUntil(not Self.InCombat(), 100, 1000);
     end;
   end
   else begin
@@ -130,23 +143,29 @@ end;
 
 procedure TCowFarmer.Loot();
 var
-  Continue: Boolean := True;
-  LootCount: Int32 := 0;
-  MaxLootCount: Int32;
+  MyPos: TPoint;
+  SearchBox: TBox;
+  CowhidePoints: TPointArray;
+  MaxChecks: Int32 := 3;
+  Index: Int32 := 0;
+  FoundLoot: Boolean := False;
 begin
-  MaxLootCount := 1;
-  while Continue do
+  MyPos := Self.RSW.GetMyTileMS();
+  SearchBox := Box(MyPos.x - 40, MyPos.y - 40, MyPos.x + 40, MyPos.y + 40);
+  SRL.FindColors(CowhidePoints, Self.CowhideColor, SearchBox);
+  while (Index < Length(CowhidePoints)) and (Index < MaxChecks) and not FoundLoot do
   begin
-    LootCount := LootCount + 1;
-    if CombatHandler.LootHandler.CheckLoot() then
+    Mouse.Move(CowhidePoints[Index]);
+    if MainScreen.GetUpText().StartsWith('Take') then
     begin
+      FoundLoot := True;
+      CombatHandler.LootHandler.HandleLooting();
       Minimap.WaitMoving(False);
-      while CombatHandler.LootHandler.CheckLoot(Self.RSW.GetMyTileMS()) do continue;
+      Wait(300, 500);
+      while Antiban.BioDice() and CombatHandler.LootHandler.CheckLoot(Self.RSW.GetMyTileMS()) do Wait(200, 400);
     end;
-    Continue := (not Inventory.IsFull()) and (LootCount < MaxLootCount);
+    Index := Index + 1;
   end;
-  if Antiban.BioDice() then Self.HandleBones();
-  if Antiban.BioDice() then Self.HandleBones();
 end;
 
 procedure TCowFarmer.HandleBones();
@@ -194,16 +213,18 @@ end;
 
 procedure TCowFarmer.BankHides();
 var
-  HideCount: Int32;
+  InventoryHideCount: Int32;
 begin
   if Bank.Hover(Self.CustomBank) then
   begin
     if Bank.WalkOpen(Self.CustomBank) then
     begin
-      HideCount := Inventory.CountItem(Self.Cowhide);
+      InventoryHideCount := Inventory.CountItem(Self.Cowhide);
       if Bank.DepositAll() then
       begin
-        Self.HideCount := Self.HideCount + HideCount;
+        Self.HideCount := Self.HideCount + InventoryHideCount;
+        Writeln(InventoryHideCount);
+        Writeln('Total hides:');
         Writeln(Self.HideCount);
         Self.State := WALK_TO_PEN;
         WaitUntil(Inventory.Count() = 0, 100, 1000);
@@ -244,13 +265,13 @@ begin
   if InventoryIsFull and PlayerPos.InBox(Self.BankBox) then Exit(BANK_HIDES);
   if not InventoryIsFull and PlayerPos.InBox(Self.BankBox) then Exit(WALK_TO_PEN);
 
-  if MainScreen.InCombat() then Exit(COW_COMBAT);
+  if Self.InCombat() then Exit(COW_COMBAT);
 
   if not InventoryIsFull and PlayerPos.InBox(Self.PenBox) then
   begin
     if (Self.State = COW_COMBAT) and Self.SeenXPOnAttack then
     begin
-      if not MainScreen.InCombat() then
+      if not Self.InCombat() then
       begin
         Self.SeenXPOnAttack := False;
         Exit(PICK_UP);
@@ -272,6 +293,8 @@ begin
   Writeln(Self.RSW.GetMyPos);
 
   repeat
+    if Inventory.IsFull() then Self.HandleBones();
+
     Self.State := Self.GetState();
     if not (Self.State = OldState) then
     begin
@@ -280,7 +303,7 @@ begin
     end;
     OldState := Self.State;
     case Self.State of
-      ATTACK_COW: CombatHandler.WalkAttackMonster();
+      ATTACK_COW: CombatHandler.AttackMonster();
       COW_COMBAT: Self.HandleInCombat();
       PICK_UP: Self.Loot();
       OUT_OF_PEN: Self.EnterPen();
@@ -371,6 +394,56 @@ begin
     end;
 
     Result += Drop;
+  end;
+end;
+
+function TRSMMDot._HoverHelper(Attempts: Int32): Boolean; override;
+var
+  Attempt: Int32;
+  ATPA: T2DPointArray;
+  Points: TPointArray;
+  CompassAngle: Double;
+begin
+  if (RSClient.Mode = ERSClientMode.FIXED) and MainScreen.HasInterface then
+    Exit(False);
+
+  if Filter.UpText and MainScreen.IsUpText(UpText) then
+    Exit(True);
+
+  if Filter.MinimapDot and (Minimap.GetDots(DotType) = []) then
+    Exit;
+
+  for Attempt := 0 to Attempts do
+  begin
+    if Self.Find(ATPA) then
+    begin
+      if Attempt < 2 then
+        Points := ATPA[0] // 0 for the closest one.
+      else if Length(ATPA) > (Attempt - 2) then
+        Points := ATPA[Attempt - 2]
+      else
+        Points := ATPA[Random(0, High(ATPA))];
+
+      if Points <> [] then
+      begin
+        if DotType = ERSMinimapDot.ITEM then
+          Mouse.Move(Points.Mean)
+        else
+          Mouse.Move(Points[Random(0, High(Points))]);
+        if not Filter.UpText then
+          Exit(True);
+      end;
+    end;
+
+    if MainScreen.IsUpText(UpText) then
+      Exit(True);
+
+    //will rotate the screen for the last attempt if hasn't hovered properly yet
+    if (DotType <> ERSMinimapDot.ITEM) and (Attempt = (Attempts - 1)) then
+    begin
+      CompassAngle := Minimap.GetCompassAngle + Random(-50, 50);
+      Minimap.SetCompassAngle(CompassAngle, 10);
+    end;
   end;
 end;
 

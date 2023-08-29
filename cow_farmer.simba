@@ -1,0 +1,293 @@
+{$I SRL-T/osr.simba}
+{$I WaspLib/osr.simba}
+{$I WaspLib/osr/handlers/combathandler.simba}
+{$I DoorHandler/doorhandler.simba}
+
+{$DEFINE SCRIPT_GUI}
+
+type
+  ECowFarmerState = (
+    ATTACK_COW,
+    COW_COMBAT,
+    PICK_UP,
+    OUT_OF_PEN,
+    WALK_TO_BANK,
+    BANK_HIDES,
+    WALK_TO_PEN,
+    LOST
+  );
+
+  TCowFarmer = record(TBaseBankScript)
+    State: ECowFarmerState;
+    SeenXPOnAttack: Boolean;
+    NorthGateHandler: DoorHandler;
+    BankBox: TBox;
+    PenBox: TBox;
+    InsideGatePos: TPoint;
+    OutsideGatePos: TPoint;
+    CenterPenPos: TPoint;
+    PathToBank: TPointArray;
+    PathToPen: TPointArray;
+    Cowhide: TRSItem;
+    HideCount: Int32;
+    CustomBank: TRSObject;
+  end;
+
+procedure TAntiban.Setup(); override;
+begin
+  //Self.Skills := [ERSSkill.TOTAL, ERSSkill.RANGE];
+  Self.MinZoom := 10;
+  Self.MaxZoom := 40;
+
+  Self.Skills := [
+    ERSSkill.TOTAL
+  ];
+
+  inherited;
+end;
+
+function TCowFarmer.GetCustomCow(): TRSMonster;
+var
+  CustomCow: TRSMonster;
+begin
+  CustomCow.Setup(55, 4, [[PenBox.x1 + 16, PenBox.y1 + 16], [PenBox.x2 - 16, PenBox.y2 - 16]]);
+  CustomCow.Setup('Cow');
+  CustomCow.UpText += 'Cow calf';
+  CustomCow.Finder.Colors += CTS2(1452592, 10);
+  CustomCow.Finder.Colors += CTS2(5463667, 10);
+  CustomCow.Finder.Colors += CTS2(5529974, 10);
+  Result := CustomCow;
+end;
+
+function TCowFarmer.GetCustomBank(): TRSObject;
+var
+  CustomBank: TRSObject
+begin
+  CustomBank.Setup(7, [[7432, 3032], [7436, 3032], [7440, 3032], [7444, 3032], [7448, 3032], [7452, 3032]]);
+  CustomBank.Setup(['ank b', 'k booth']);
+  CustomBank.Finder.Colors += CTS2(3099996, 17, 0.12, 0.59);
+  CustomBank.Finder.Colors += CTS2(4086642, 5, 0.08, 0.55);
+  Result := CustomBank;
+end;
+
+procedure TCowFarmer.Init(maxActions: Int32; maxTime: Int64); override;
+begin
+  inherited;
+
+  Self.RSW.Setup('world');
+
+  Self.BankBox := Box(7420, 3012, 7460, 3028);
+  Self.PenBox := Box(7476, 3196, 7564, 3260);
+  Self.OutsideGatePos := Point(7520, 3192);
+  Self.InsideGatePos := Point(7520, 3196);
+  Self.CenterPenPos := Point(7516, 3220);
+  Self.PathToBank := [Point(7492, 3176), Point(7448, 3172), Point(7424, 3160), Point(7420, 3100), Point(7420, 3012), Point(7440, 3012), Point(7440, 3024)];
+  Self.PathToPen := [Point(7440, 3024), Point(7440, 3012), Point(7420, 3012), Point(7420, 3100), Point(7424, 3160), Point(7448, 3172), Point(7492, 3176)];
+
+  NorthGateHandler.Setup('North Gate Handler', GATE_2, [Point(7520, 3196), Point(7520, 3192)], [Point(7516, 3188), Point(7512, 3188)], Self.RSW);
+
+  Self.Cowhide := 'Cowhide';
+  Self.CustomBank := Self.GetCustomBank();
+
+  CombatHandler.Setup(True, Self.GetCustomCow(), 10, 2000);
+  Options.SetNPCAttackOption(ERSAttackOption.ALWAYS_LEFT_CLICK);
+  Combat.SetAutoRetaliate(True);
+end;
+
+procedure TCowFarmer.AttackCow();
+begin
+  if CombatHandler.WalkAttackMonster() then
+  begin
+    Self.State := COW_COMBAT;
+    Self.SeenXPOnAttack := False;
+  end;
+end;
+
+procedure TCowFarmer.Loot();
+var
+  Continue: Boolean := True;
+  LootCount: Int32 := 0;
+begin
+  while Continue do
+  begin
+    LootCount := LootCount + 1;
+    Continue := CombatHandler.LootHandler.CheckLoot() and (LootCount < 3);
+  end;
+  Self.HandleBones();
+end;
+
+procedure TCowFarmer.HandleBones();
+var
+  Done: Boolean;
+begin
+  while not Done do Done := not CombatHandler.DoBuryBones();
+end;
+
+procedure TCowFarmer.EnterPen();
+begin
+  Self.RSW.WalkPath([Self.InsideGatePos], 3);
+  if not Self.RSW.GetMyPos().InBox(Self.PenBox) then
+  begin
+    //Self.RSW.WalkPath([Self.OutsideGatePos]);
+    if not Self.NorthGateHandler.IsOpen() then Self.NorthGateHandler.Open();
+    Wait(500, 1000);
+    Self.RSW.WalkPath([Self.CenterPenPos]);
+  end;
+end;
+
+procedure TCowFarmer.ExitPen();
+begin
+  Self.RSW.WalkPath([Self.OutsideGatePos], 3);
+  if Self.RSW.GetMyPos().InBox(Self.PenBox) then
+  begin
+    //Self.RSW.WalkPath([Self.OutsideGatePos]);
+    if not Self.NorthGateHandler.IsOpen() then Self.NorthGateHandler.Open();
+    Wait(500, 1000);
+    Self.RSW.WalkPath([Self.OutsideGatePos]);
+  end;
+end;
+
+procedure TCowFarmer.WalkToBank();
+begin
+  Self.ExitPen();
+  Self.RSW.WalkPath(Self.PathToBank);
+end;
+
+procedure TCowFarmer.WalkToPen();
+begin
+  Self.RSW.WalkPath(Self.PathToPen);
+  Self.EnterPen();
+end;
+
+procedure TCowFarmer.BankHides();
+var
+  HideCount: Int32;
+begin
+  if Bank.Hover(Self.CustomBank) then
+  begin
+    if Bank.WalkOpen(Self.CustomBank) then
+    begin
+      HideCount := Inventory.CountItem(Self.Cowhide);
+      if Bank.DepositAll() then
+      begin
+        Self.HideCount := Self.HideCount + HideCount;
+        Writeln(Self.HideCount);
+        Self.State := WALK_TO_PEN;
+        Bank.Close(AntiBan.BioDice());
+      end;
+    end;
+  end;
+end;
+
+function TCowFarmer.InCombat(): Boolean;
+begin
+  if not Self.SeenXPOnAttack then Self.SeenXPOnAttack := MainScreen.FindHitsplats() <> [];
+  Result := MainScreen.InCombat();
+end;
+
+function TCowFarmer.GetState(): ECowFarmerState;
+var
+  PlayerPos: TPoint;
+  InventoryIsFull: Boolean;
+begin
+  PlayerPos := Self.RSW.GetMyPos();
+  InventoryisFull := Inventory.IsFull();
+
+  if InventoryIsFull and PlayerPos.InBox(Self.PenBox) then Exit(WALK_TO_BANK);
+  if InventoryIsFull and PlayerPos.InBox(Self.BankBox) then Exit(BANK_HIDES);
+  if not InventoryIsFull and PlayerPos.InBox(Self.BankBox) then Exit(WALK_TO_PEN);
+
+  if MainScreen.InCombat() then Exit(COW_COMBAT);
+
+  if not InventoryIsFull and PlayerPos.InBox(Self.PenBox) then
+  begin
+    if (Self.State = COW_COMBAT) and Self.SeenXPOnAttack then
+    begin
+      if not MainScreen.InCombat() then
+      begin
+        Self.SeenXPOnAttack := False;
+        Exit(PICK_UP);
+      end;
+      Exit(COW_COMBAT)
+    end;
+
+    Exit(ATTACK_COW);
+  end;
+
+  // We got lost, try to get back on track.
+  Exit(LOST);
+end;
+
+procedure TCowFarmer.Run();
+var
+  OldState: ECowFarmerState;
+begin
+  Writeln(Self.RSW.GetMyPos);
+
+  repeat
+    Self.State := Self.GetState();
+    if not (Self.State = OldState) then
+    begin
+      Writeln Self.State;
+      Self.DoAntiban();
+    end;
+    OldState := Self.State;
+    case Self.State of
+      ATTACK_COW: CombatHandler.WalkAttackMonster();
+      COW_COMBAT: WaitUntil(not Self.InCombat(), 250, 2000);
+      PICK_UP: Self.Loot();
+      OUT_OF_PEN: Self.EnterPen();
+      WALK_TO_BANK: Self.WalkToBank();
+      BANK_HIDES: Self.BankHides();
+      WALK_TO_PEN: Self.WalkToPen();
+      LOST: Self.RSW.WalkPath(Self.PathToBank);
+    end;
+  until Self.ShouldStop();
+
+  Writeln(Self.BuildTextReport);
+end;
+
+
+{$IFDEF SCRIPT_GUI}
+type
+  TCowFarmerConfig = record(TScriptForm)
+  SomeSelector: TLabeledCombobox;
+  end;
+
+procedure TCowFarmerConfig.Run(); override;
+var
+  tab: TTabSheet;
+begin
+  Self.Setup('Cow Farmer');
+  Self.Start.setOnClick(@Self.StartScript);
+
+  Self.AddTab('Script Settings');
+  tab := Self.Tabs[High(Self.Tabs)];
+
+  Self.CreateAccountManager(tab);
+
+  Self.CreateVersionPanel(tab);
+  Self.CreateAntibanManager();
+  Self.CreateWaspLibSettings();
+  Self.CreateAPISettings();
+
+  inherited;
+end;
+{$ENDIF}
+
+
+
+var
+  CowFarmer: TCowFarmer;
+{$IFDEF SCRIPT_GUI}
+  CowFarmerConfig: TCowFarmerConfig
+{$ENDIF}
+begin
+  {$IFDEF SCRIPT_GUI}
+  CowFarmerConfig.Run();
+  {$ENDIF}
+  CowFarmer.Init(20, 7200000);
+
+  CowFarmer.Run();
+end;
+

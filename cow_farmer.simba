@@ -33,6 +33,7 @@ type
     CustomBank: TRSObject;
     LootInCombat: Boolean;
     CowhideColor: TCTS2Color;
+    LostCount: Int32;
   end;
 
 procedure TAntiban.Setup(); override;
@@ -98,6 +99,8 @@ begin
   Self.LootInCombat := True;
   Self.CowhideColor := CTS2(13092814, 10);
 
+  Self.LostCount := 0;
+
   CombatHandler.Setup(True, Self.GetCustomCow(), 10, 2000);
   Options.SetNPCAttackOption(ERSAttackOption.ALWAYS_LEFT_CLICK);
   Combat.SetAutoRetaliate(True);
@@ -123,7 +126,7 @@ begin
 
   if Self.LootInCombat then
   begin
-    WaitUntil(not Self.InCombat(), 100, 2000);
+    WaitUntil(not Self.InCombat(), 100, 1000);
     if Self.InCombat() and Antiban.BioDice() then
     begin
       if CombatHandler.LootHandler.CheckLoot() then
@@ -146,7 +149,7 @@ var
   MyPos: TPoint;
   SearchBox: TBox;
   CowhidePoints: TPointArray;
-  MaxChecks: Int32 := 2;
+  MaxChecks: Int32 := 1;
   Index: Int32 := 0;
   FoundLoot: Boolean := False;
 begin
@@ -225,9 +228,12 @@ begin
       if Bank.DepositAll() then
       begin
         Self.HideCount := Self.HideCount + InventoryHideCount;
+        Writeln('Banking hides:');
         Writeln(InventoryHideCount);
         Writeln('Total hides:');
         Writeln(Self.HideCount);
+        Writeln('Lost count:');
+        Writeln(Self.LostCount);
         Self.State := WALK_TO_PEN;
         WaitUntil(Inventory.Count() = 0, 100, 1000);
         Bank.Close(AntiBan.BioDice());
@@ -242,6 +248,7 @@ var
   DistanceToBank: Double;
   DistanceToPen: Double;
 begin
+  Self.LostCount := Self.LostCount + 1;
   MyPos := Self.RSW.GetMyPos();
   DistanceToBank := MyPos.DistanceTo(Self.PathToBank[Length(Self.PathToBank) - 1]);
   DistanceToPen := MyPos.DistanceTo(Self.CenterPenPos);

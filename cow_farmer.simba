@@ -130,7 +130,7 @@ begin
       begin
         Minimap.WaitMoving(False);
         Wait(300, 500);
-        while CombatHandler.LootHandler.CheckLoot(Self.RSW.GetMyTileMS()) do wait(200, 400);
+        CombatHandler.LootHandler.CheckLoot(Self.RSW.GetMyTileMS());
         if Antiban.BioDice() then Self.HandleBones();
       end;
       WaitUntil(not Self.InCombat(), 100, 1000);
@@ -146,7 +146,7 @@ var
   MyPos: TPoint;
   SearchBox: TBox;
   CowhidePoints: TPointArray;
-  MaxChecks: Int32 := 3;
+  MaxChecks: Int32 := 2;
   Index: Int32 := 0;
   FoundLoot: Boolean := False;
 begin
@@ -184,7 +184,8 @@ begin
     Self.NorthGateHandler.Open();
     Wait(500, 1000);
   end;
-  Self.RSW.WalkPath([Self.CenterPenPos], 3);
+  Self.RSW.WalkPath([Self.CenterPenPos], 2);
+  Minimap.WaitMoving(False);
 end;
 
 procedure TCowFarmer.ExitPen();
@@ -196,19 +197,20 @@ begin
     Self.NorthGateHandler.Open();
     Wait(500, 1000);
   end;
-  Self.RSW.WalkPath([Self.OutsideGatePos]);
+  Self.RSW.WalkPath([Self.PathToBank[0]]);
+  Minimap.WaitMoving(False);
 end;
 
 procedure TCowFarmer.WalkToBank();
 begin
-  Self.ExitPen();
+  while Self.RSW.GetMyPos().InBox(Self.PenBox) do Self.ExitPen();
   Self.RSW.WalkPath(Self.PathToBank);
 end;
 
 procedure TCowFarmer.WalkToPen();
 begin
-  Self.RSW.WalkPath(Self.PathToPen);
-  Self.EnterPen();
+  RSW.WalkPath(Self.PathToPen);
+  while not Self.RSW.GetMyPos().InBox(Self.PenBox) do Self.EnterPen();
 end;
 
 procedure TCowFarmer.BankHides();
@@ -356,7 +358,7 @@ begin
   {$IFDEF SCRIPT_GUI}
   CowFarmerConfig.Run();
   {$ENDIF}
-  CowFarmer.Init(20, 7200000);
+  CowFarmer.Init(WLSettings.MaxActions, WLSettings.MaxTime);
 
   CowFarmer.Run();
 end;

@@ -276,7 +276,6 @@ begin
   Self.OutsideGatePos := Point(7520, 3192);
   Self.InsideGatePos := Point(7520, 3196);
   Self.CenterPenPos := Point(7516, 3220);
-  // TODO: Add more points to paths, maybe causing crashing?
   Self.PathToBank := [Point(7492, 3176), Point(7448, 3172), Point(7424, 3160), Point(7420, 3100), Point(7420, 3012), Point(7440, 3012), Point(7440, 3024)];
   Self.PathToPen := [Point(7440, 3024), Point(7440, 3012), Point(7420, 3012), Point(7420, 3100), Point(7424, 3160), Point(7448, 3172), Point(7492, 3176)];
 

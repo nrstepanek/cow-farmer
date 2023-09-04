@@ -1,4 +1,4 @@
-{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '1'}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '2'}
 
 {$I SRL-T/osr.simba}
 {$I WaspLib/osr.simba}
@@ -8,111 +8,169 @@
 
 
 type
-  EDoorType = (
-    DOOR,
-    GATE,
-    GATE_2
+  ERSDoor = (
+    FALADOR_COW_PEN_NORTH_GATE,
+    LUMBRIDGE_EAST_CHICKEN_PEN_EAST_GATE
   );
 
-  DoorHandler = record(TSRLBaseRecord)
+  TRSDoor = record(TSRLBaseRecord) class var
     ClosedPoints: TPointArray;
     OpenPoints: TPointArray;
-    RSW: TRSWalker;
-    DoorType: EDoorType;
+    ClosedUpText: String;
+    OpenUpText: String;
     DoorColor: TCTS2Color;
+    Colors: Array of TCTS2Color;
+    DoorHeight: Int32;
   end;
 
-procedure DoorHandler.Setup(Name: String; DoorType: EDoorType; ClosedPoints, OpenPoints: TPointArray);
+  TDoorHandler = record(TSRLBaseRecord)
+    RSW: TRSWalker;
+  end;
+
+
+function GetRSDoor(RSDoorEnum: ERSDoor): TRSDoor; static;
+var
+  RSDoor: TRSDoor;
 begin
+  case RSDoorEnum of
+    FALADOR_COW_PEN_NORTH_GATE:
+    begin
+      RSDoor.DoorColor := CTS2(6387845, 10);
+      RSDoor.Colors := [CTS2(6387845, 10), CTS2(2768199, 10)];
+      RSDoor.DoorHeight := 2;
+      RSDoor.ClosedPoints := [Point(7520, 3196), Point(7516, 3192)];
+      RSDoor.OpenPoints := [Point(7516, 3192), Point(7512, 3188)];
+      RSDoor.ClosedUpText := "Open Gate";
+      RSDoor.OpenUpText := "Close Gate";
+    end;
+    LUMBRIDGE_EAST_CHICKEN_PEN_EAST_GATE:
+    begin
+      // TODO
+    end;
+  end;
+
+  Exit(RSDoor);
+end;
+
+
+procedure TDoorHandler.Setup();
+begin
+  Self.Name := 'Door Handler';
   Self.RSW.Setup('world');
-  Self.Setup(Name, DoorType, ClosedPoints, OpenPoints, Self.RSW);
 end;
 
-procedure DoorHandler.Setup(Name: String; DoorType: EDoorType; ClosedPoints, OpenPoints: TPointArray; RSWalker: TRSWalker); overload;
+
+procedure TDoorHandler.Setup(RSWalker: TRSWalker); overload;
 begin
+  Self.Name := 'Door Handler';
   Self.RSW := RSWalker;
-  Self.Name := Name;
-  Self.DoorType := DoorType;
-  Self.ClosedPoints := ClosedPoints;
-  Self.OpenPoints := OpenPoints;
-  Self.SetupDoorColor();
 end;
 
-procedure DoorHandler.SetupDoorColor();
-begin
-  case Self.DoorType of
-    DOOR: Self.DoorColor := CTS2(1, 10);
-    GATE: Self.DoorColor := CTS2(1065049, 10);
-    GATE_2: Self.DoorColor := CTS2(6387845, 10);
-  end;
-end;
 
-procedure DoorHandler.MoveMouseToDoor(Point1, Point2: TPoint);
+function TDoorHandler.GetDoorMSPos(RSDoor: TRSDoor; OpenPosition: Boolean): TPoint;
 var
   Point1MSMean: TPoint;
   Point2MSMean: TPoint;
   DoorMS: TPoint;
 begin
-  Point1MSMean := Self.RSW.GetTileMS(Point1).Mean();
-  Point2MSMean := Self.RSW.GetTileMS(Point2).Mean();
+  if OpenPosition then
+  begin
+    Point1MSMean := Self.RSW.GetTileMS(RSDoor.OpenPoints[0], RSDoor.DoorHeight).Mean();
+    Point2MSMean := Self.RSW.GetTileMS(RSDoor.OpenPoints[1], RSDoor.DoorHeight).Mean();
+  end else
+  begin
+    Point1MSMean := Self.RSW.GetTileMS(RSDoor.ClosedPoints[0], RSDoor.DoorHeight).Mean();
+    Point2MSMean := Self.RSW.GetTileMS(RSDoor.ClosedPoints[1], RSDoor.DoorHeight).Mean();
+  end;
   DoorMS := Point(Round((Point1MSMean.X + Point2MSMean.X) / 2), Round((Point1MSMean.Y + Point2MSMean.Y) / 2));
-  Mouse.Move(DoorMS);
+  Exit(DoorMS);
 end;
 
-function DoorHandler.IsOpen(): Boolean;
-begin
-  Self.MoveMouseToDoor(OpenPoints[0], OpenPoints[1]);
-  if MainScreen.GetUpText().startsWith('Close') then Exit(True);
-  Exit(Self.HoneInOnDoor('Close'));
-end;
 
-function DoorHandler.IsClosed(): Boolean;
-begin
-  Self.MoveMouseToDoor(ClosedPoints[0], ClosedPoints[1]);
-  if MainScreen.GetUpText().startsWith('Open') then Exit(True);
-  Exit(Self.HoneInOnDoor('Open'));
-end;
+function TDoorHandler.Find(RSDoor: TRSDoor; OpenPosition: Boolean): Boolean;
+  function GetObjPt: TPoint;
+  var
+    B: TBox;
+    i: Int32;
+    DoorMSPos: TPoint;
+    ATPA: T2DPointArray;
+    Finder: TRSObjectFinder;
+  begin
+    for i:=0 to High(RSDoor.Colors) do
+      Finder.Colors += RSDoor.Colors[i];
 
-function DoorHandler.HoneInOnDoor(ExpectedText: String): Boolean;
+    Finder.ClusterDistance := 10;
+
+    DoorMSPos := Self.GetDoorMSPos(RSDoor, OpenPosition);
+    B := Box(DoorMSPos.x - 10, DoorMSPos.y - 10, DoorMSPos.x + 10, DoorMSPos.y + 10);
+
+    B.LimitTo(MainScreen.Bounds);
+    if MainScreen.IsVisible(B.Middle()) then
+    begin
+      ATPA := MainScreen.FindObject(Finder, B);
+      if (ATPA.Len > 0) then
+        Result := ATPA.Biggest().Mean();
+    end;
+  end;
+
 var
-  DoorPoints: TPointArray;
-  SearchBox: TBox;
-  MousePos: TPoint;
-  Index: Int32;
+  Pt: TPoint;
 begin
-  MousePos := Mouse.Position();
-  // TODO: Search more/less based on zoom level.
-  SearchBox := Box(MousePos.x - 8, MousePos.y - 8, MousePos.x + 8, MousePos.y + 8);
-  SRL.FindColors(DoorPoints, Self.DoorColor, SearchBox);
-  if length(DoorPoints) = 0 then Exit(False);
-  DoorPoints.Sort(MousePos);
-  Index := 0;
-  while not MainScreen.GetUpText().startsWith(ExpectedText) and (Index < length(DoorPoints)) do
-  begin
-    Mouse.Move(DoorPoints[Index]);
-    Index := Index + 1;
-  end;
-  Exit(MainScreen.GetUpText().startsWith(ExpectedText));
+  Result := False;
+
+  if Inventory.GetSelectedSlot >= 0 then
+    ChooseOption.Select('Cancel');
+
+  Pt := GetObjPt;
+  if Pt.X<5 then Exit;
+
+  Mouse.Move(Pt);
+  if OpenPosition then Result := MainScreen.IsUpText(RSDoor.OpenUpText, 75)
+  else Result := MainScreen.IsUpText(RSDoor.ClosedUpText, 75);
 end;
 
-function DoorHandler.Open(): Boolean;
-begin
-  Self.MoveMouseToDoor(ClosedPoints[0], ClosedPoints[1]);
-  if MainScreen.GetUpText().startsWith('Open') then
-  begin
-    Mouse.Click(MOUSE_LEFT);
-    Minimap.WaitMoving(False);
-    Exit(True);
-  end;
 
-  if Self.HoneInOnDoor('Open') then
+function TDoorHandler.IsOpen(RSDoor: TRSDoor): Boolean;
+begin
+  Self.Find(RSDoor, True);
+  if MainScreen.IsUpText(RSDoor.OpenUpText) then Exit(True);
+end;
+
+
+function TDoorHandler.IsClosed(RSDoor: TRSDoor): Boolean;
+begin
+  Self.Find(RSDoor, False);
+  if MainScreen.IsUpText(RSDoor.ClosedUpText) then Exit(True);
+end;
+
+
+function TDoorHandler.Open(RSDoor: TRSDoor): Boolean;
+begin
+  Self.Find(RSDoor, False);
+
+  if MainScreen.IsUpText(RSDoor.ClosedUpText) then
   begin
     Mouse.Click(MOUSE_LEFT);
-    Minimap.WaitMoving(False);
-    Exit(True);
+    if Result := MainScreen.DidRedClick() then
+      WaitUntil(not Self.IsClosed(RSDoor), 500, 3000);
+    Exit(Result);
   end;
-  Exit(False);
 end;
+
+
+function TDoorHandler.Close(RSDoor: TRSDoor): Boolean;
+begin
+  Self.Find(RSDoor, True);
+
+  if MainScreen.IsUpText(RSDoor.OpenUpText) then
+  begin
+    Mouse.Click(MOUSE_LEFT);
+    if Result := MainScreen.DidRedClick() then
+      WaitUntil(not Self.IsOpen(RSDoor), 500, 3000);
+    Exit(Result);
+  end;
+end;
+
 
 // by Rasta Magician, veteran SRL-er
 function ProgReport(
@@ -207,7 +265,8 @@ type
   TCowFarmer = record(TBaseBankScript)
     State: ECowFarmerState;
     SeenXPOnAttack: Boolean;
-    NorthGateHandler: DoorHandler;
+    DoorHandler: TDoorHandler;
+    NorthGate: TRSDoor;
     BankBox: TBox;
     PenBox: TBox;
     InsideGatePos: TPoint;
@@ -226,12 +285,15 @@ type
 
 procedure TAntiban.Setup(); override;
 begin
-  //Self.Skills := [ERSSkill.TOTAL, ERSSkill.RANGE];
   Self.MinZoom := 20;
   Self.MaxZoom := 35;
+  Self.AdjustZoom();
 
   Self.Skills := [
     ERSSkill.HITPOINTS,
+    ERSSkill.ATTACK,
+    ERSSkill.STRENGTH,
+    ERSSkill.DEFENCE,
     ERSSkill.PRAYER,
     ERSSkill.TOTAL
   ];
@@ -279,7 +341,8 @@ begin
   Self.PathToBank := [Point(7492, 3176), Point(7448, 3172), Point(7424, 3160), Point(7420, 3100), Point(7420, 3012), Point(7440, 3012), Point(7440, 3024)];
   Self.PathToPen := [Point(7440, 3024), Point(7440, 3012), Point(7420, 3012), Point(7420, 3100), Point(7424, 3160), Point(7448, 3172), Point(7492, 3176)];
 
-  NorthGateHandler.Setup('North Gate Handler', GATE_2, [Point(7520, 3196), Point(7520, 3192)], [Point(7516, 3188), Point(7512, 3188)], Self.RSW);
+  Self.DoorHandler.Setup(Self.RSW);
+  Self.NorthGate := GetRSDoor(FALADOR_COW_PEN_NORTH_GATE);
 
   Self.Cowhide := 'Cowhide';
   Self.CustomBank := Self.GetCustomBank();
@@ -325,6 +388,7 @@ var
   FoundLoot: Boolean := True;
   UpText: String;
   NextPointCheck: TPoint;
+  NumEmptySlots: Int32;
 begin
   while FoundLoot do
   begin
@@ -345,9 +409,9 @@ begin
         FoundLoot := True;
         // TODO: Why does this right click and not pick up anything?
         // When it right clicks and sees good loot text it returns true, but doesn't click anything
+        NumEmptySlots := Inventory.CountEmptySlots();
         CombatHandler.LootHandler.HandleLooting();
-        Minimap.WaitMoving(False);
-        Wait(500, 800);
+        WaitUntil(Inventory.CountEmptySlots() < NumEmptySlots, 300, 3000);
         CombatHandler.LootHandler.CheckLoot(Self.RSW.GetMyTileMS());
       end;
       Index := Index + 1;
@@ -366,28 +430,32 @@ procedure TCowFarmer.EnterPen();
 begin
   Self.RSW.WalkPath([Self.OutsideGatePos], 5);
   Minimap.WaitMoving(False);
-  if not Self.NorthGateHandler.IsOpen() then
+  if not Self.DoorHandler.IsOpen(Self.NorthGate) then
   begin
-    Self.NorthGateHandler.Open();
-    Wait(500, 1000);
+    if not Self.DoorHandler.Open(Self.NorthGate) then
+    begin
+      Antiban.RandomRotate();
+      Exit;
+    end;
   end;
   Self.RSW.WalkPath([Self.CenterPenPos], 2);
   Minimap.WaitMoving(False);
-  Antiban.RandomRotate();
 end;
 
 procedure TCowFarmer.ExitPen();
 begin
   Self.RSW.WalkPath([Self.InsideGatePos], 5);
   Minimap.WaitMoving(False);
-  if not Self.NorthGateHandler.IsOpen() then
+  if not Self.DoorHandler.IsOpen(Self.NorthGate) then
   begin
-    Self.NorthGateHandler.Open();
-    Wait(500, 1000);
+    if not Self.DoorHandler.Open(Self.NorthGate) then
+    begin
+      Antiban.RandomRotate();
+      Exit;
+    end;
   end;
   Self.RSW.WalkPath([Self.PathToBank[0]]);
   Minimap.WaitMoving(False);
-  Antiban.RandomRotate();
 end;
 
 procedure TCowFarmer.WalkToBank();

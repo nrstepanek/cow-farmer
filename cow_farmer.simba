@@ -1,4 +1,4 @@
-{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '1'}
+{$UNDEF SCRIPT_REVISION}{$DEFINE SCRIPT_REVISION := '2'}
 
 {$I SRL-T/osr.simba}
 {$I WaspLib/osr.simba}
@@ -388,6 +388,7 @@ var
   FoundLoot: Boolean := True;
   UpText: String;
   NextPointCheck: TPoint;
+  NumEmptySlots: Int32;
 begin
   while FoundLoot do
   begin
@@ -408,9 +409,9 @@ begin
         FoundLoot := True;
         // TODO: Why does this right click and not pick up anything?
         // When it right clicks and sees good loot text it returns true, but doesn't click anything
+        NumEmptySlots := Inventory.CountEmptySlots();
         CombatHandler.LootHandler.HandleLooting();
-        Minimap.WaitMoving(False);
-        Wait(500, 800);
+        WaitUntil(Inventory.CountEmptySlots() < NumEmptySlots, 300, 3000);
         CombatHandler.LootHandler.CheckLoot(Self.RSW.GetMyTileMS());
       end;
       Index := Index + 1;
